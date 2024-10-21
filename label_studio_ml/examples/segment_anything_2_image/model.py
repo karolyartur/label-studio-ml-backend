@@ -2,6 +2,8 @@ import torch
 import numpy as np
 import os
 import pathlib
+import shapely
+import supervision as sv
 from typing import List, Dict, Optional
 from uuid import uuid4
 from label_studio_ml.model import LabelStudioMLBase
@@ -48,8 +50,12 @@ class NewModel(LabelStudioMLBase):
             label_id = str(uuid4())[:4]
             # converting the mask from the model to RLE format which is usable in Label Studio
             mask = mask * 255
-            rle = brush.mask2rle(mask)
+            mask_height = mask.shape[0]
+            mask_width = mask.shape[1]
             total_prob += prob
+            poly = [[x/mask_width*100, y/mask_height*100] for [x,y] in sv.mask_to_polygons(mask)[0]]
+            simple_poly = shapely.simplify(shapely.Polygon(poly), tolerance=0.1)
+            poly = [[x,y] for x,y in zip(*simple_poly.exterior.coords.xy)]
             results.append({
                 'id': label_id,
                 'from_name': from_name,
@@ -58,12 +64,12 @@ class NewModel(LabelStudioMLBase):
                 'original_height': height,
                 'image_rotation': 0,
                 'value': {
-                    'format': 'rle',
-                    'rle': rle,
-                    'brushlabels': [label],
+                    'points': poly,
+                    'closed': True,
+                    'polygonlabels': [label],
                 },
                 'score': prob,
-                'type': 'brushlabels',
+                'type': 'polygonlabels',
                 'readonly': False
             })
 
@@ -106,7 +112,7 @@ class NewModel(LabelStudioMLBase):
     def predict(self, tasks: List[Dict], context: Optional[Dict] = None, **kwargs) -> ModelResponse:
         """ Returns the predicted mask for a smart keypoint that has been placed."""
 
-        from_name, to_name, value = self.get_first_tag_occurence('BrushLabels', 'Image')
+        from_name, to_name, value = self.get_first_tag_occurence('PolygonLabels', 'Image')
 
         if not context or not context.get('result'):
             # if there is no context, no interaction has happened yet
